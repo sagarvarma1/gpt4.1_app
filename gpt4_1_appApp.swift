@@ -6,9 +6,16 @@
 //
 
 import SwiftUI
+import UIKit
 
 @main
 struct gpt4_1_appApp: App {
+    
+    init() {
+        UITextView.appearance().backgroundColor = .clear
+        print("Configured UITextView appearance: Background set to clear.")
+    }
+    
     var body: some Scene {
         WindowGroup {
             ContentView()

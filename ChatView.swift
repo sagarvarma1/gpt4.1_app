@@ -32,6 +32,7 @@ struct ChatView: View {
     @State private var selectedPhotoItem: PhotosPickerItem? = nil
     @State private var selectedImage: UIImage? = nil
     @State private var showingCameraPicker = false // Separate state for camera sheet
+    @State private var showingPhotosPicker = false // Separate state for Photos picker
     @State private var isLoading = false // State for loading indicator
 
     let storageManager: StorageManager
@@ -105,23 +106,38 @@ struct ChatView: View {
             // Input area
             HStack(spacing: 10) {
                  Button(action: {
-                     hideKeyboard() // Dismiss keyboard before showing options
+                     hideKeyboard()
                      showingAttachmentOptions = true
                  }) {
                      Image(systemName: "plus.circle.fill")
                          .resizable()
                          .frame(width: 30, height: 30)
                  }
-                 .disabled(isLoading) // Disable while loading
+                 .disabled(isLoading)
 
-                // Rounded TextField
-                 HStack {
-                    TextField("Type your message...", text: $messageText, onCommit: { sendMessage() })
-                         .padding(.horizontal, 10)
-                         .padding(.vertical, 8)
+                 // Use TextEditor for multi-line input
+                 ZStack(alignment: .leading) {
+                     // Placeholder Text
+                     if messageText.isEmpty {
+                         Text("Ask Anything...") // Updated placeholder text
+                             .foregroundColor(Color(.placeholderText))
+                             .padding(.horizontal, 5)
+                             .padding(.vertical, 8) // Match TextEditor padding
+                     }
+                     
+                     TextEditor(text: $messageText)
+                         .frame(maxHeight: 100) 
+                         .fixedSize(horizontal: false, vertical: true) 
+                         .padding(.vertical, 4) 
+                         .padding(.horizontal, 1)
+                         .scrollContentBackground(.hidden) // Hide default scroll view background
+                         .background(Color.clear) // Keep explicit clear background
+                         
                  }
+                 .padding(.horizontal, 10)
+                 .padding(.vertical, 4) 
                  .background(Color(.systemGray6))
-                 .clipShape(Capsule())
+                 .clipShape(RoundedRectangle(cornerRadius: 20)) 
 
                 // Send button
                  Button(action: { sendMessage() }) {
@@ -134,7 +150,7 @@ struct ChatView: View {
              }
              .padding(.horizontal)
              .padding(.vertical, 8)
-             .opacity(isLoading ? 0.5 : 1.0) // Dim input while loading
+             .opacity(isLoading ? 0.5 : 1.0)
         }
         .contentShape(Rectangle()) // Ensure the VStack receives gestures in empty areas
         .gesture(
@@ -191,41 +207,35 @@ struct ChatView: View {
                  .ignoresSafeArea() // Allow camera full screen
          }
          .photosPicker( // Modifier for Photo Library selection
-             isPresented: .constant(selectedPhotoItem != nil), // Use constant binding derived from item state
+             isPresented: $showingPhotosPicker, // Bind to dedicated state variable
              selection: $selectedPhotoItem,
-             matching: .images // Only allow images
+             matching: .images 
          )
          .onChange(of: selectedPhotoItem) { _, newItem in // Handle selection from PhotosPicker
-             Task { @MainActor in // Use Task for async loading
+             Task { @MainActor in 
                 if let data = try? await newItem?.loadTransferable(type: Data.self) {
                     selectedImage = UIImage(data: data)
-                    selectedPhotoItem = nil // Clear the item state after loading
+                    // Don't set selectedPhotoItem = nil here
                 } else {
                     print("Failed to load image data")
-                    selectedPhotoItem = nil // Clear item state even on failure
                 }
+                // Picker dismisses automatically via the binding
+                // selectedPhotoItem = nil // REMOVED
              }
          }
          .confirmationDialog("Attach Content", isPresented: $showingAttachmentOptions, titleVisibility: .visible) {
              Button {
-                 // Trigger Photos Picker by setting the item state (indirectly via binding)
-                 // We need a way to signal the .photosPicker modifier. 
-                 // A simple trick is to just set the item state variable, but PhotoPicker 
-                 // requires a binding for isPresented. Let's slightly change the .photosPicker binding.
-                 // Reverted: Setting selectedPhotoItem *will* trigger the picker IF the binding is set up correctly.
-                 // Let's try setting the state that controls the binding
-                 selectedPhotoItem = PhotosPickerItem(itemIdentifier: "placeholder") // Set dummy item to trigger picker
+                 // Trigger Photos Picker by setting its dedicated state variable
+                 showingPhotosPicker = true 
              } label: {
                  Label("Photos", systemImage: "photo.on.rectangle")
              }
 
              Button {
-                 // Check if camera is available before presenting
                  if UIImagePickerController.isSourceTypeAvailable(.camera) {
                      showingCameraPicker = true
                  } else {
                      print("Camera not available")
-                     // Optionally show an alert to the user
                  }
              } label: {
                  Label("Camera", systemImage: "camera")
@@ -369,23 +379,37 @@ struct ChatView: View {
 struct MessageView: View {
     let message: ChatMessage
 
+    // Computed property to safely create AttributedString from Markdown
+    private var attributedString: AttributedString {
+        do {
+            // Attempt to initialize AttributedString from Markdown
+            return try AttributedString(markdown: message.text)
+        } catch {
+            // If Markdown parsing fails, return a plain AttributedString
+            print("Error parsing Markdown: \(error)")
+            return AttributedString(message.text)
+        }
+    }
+
     var body: some View {
         HStack {
             if message.isFromUser {
-                Spacer() // Push user message to the right
+                Spacer() 
                 Text(message.text)
                     .padding(.horizontal, 12)
                     .padding(.vertical, 8)
                     .background(Color.blue)
                     .foregroundColor(.white)
-                    .clipShape(Capsule()) // Rounded bubble
+                    .clipShape(Capsule())
+                    .textSelection(.enabled)
             } else {
-                Text(message.text)
+                // Display the AttributedString
+                Text(attributedString)
                     .padding(.horizontal, 12)
                     .padding(.vertical, 8)
-                    // No background for model messages
-                    .foregroundColor(Color(.label)) // Ensure text is visible in light/dark mode
-                Spacer() // Keep model message to the left
+                    .foregroundColor(Color(.label))
+                    .textSelection(.enabled)
+                Spacer() 
             }
         }
     }
