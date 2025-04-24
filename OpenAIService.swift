@@ -188,20 +188,45 @@ class OpenAIService {
         for (index, message) in currentHistory.enumerated() {
             let role = message.isFromUser ? "user" : "assistant"
             
-            // Check if it's the last message, from the user, and if a new image was provided for THIS turn
-            if message.isFromUser && index == currentHistory.count - 1 && newImage != nil {
-                // Convert UIImage to Base64 for the last message
-                guard let img = newImage, 
-                      let imageData = img.jpegData(compressionQuality: 0.8), 
-                      !imageData.isEmpty else {
+            // For the last user message, include the image if provided
+            if index == currentHistory.count - 1 && message.isFromUser && newImage != nil {
+                guard let image = newImage else {
+                    apiMessages.append(OpenAIMessage(role: role, text: message.text))
+                    continue
+                }
+                
+                // Convert image to data with proper compression and quality handling
+                guard let imageData = image.jpegData(compressionQuality: 0.7) ?? image.pngData() else {
+                    print("Failed to convert image to data")
                     throw ServiceError.imageConversionFailed
                 }
-                let base64Image = imageData.base64EncodedString()
-                print("Image included for last user message, base64 size: \(base64Image.count)")
-                apiMessages.append(OpenAIMessage(role: role, text: message.text, base64Image: base64Image))
+                
+                // Limit size for API constraints (less than 20MB for OpenAI)
+                if imageData.count > 10_000_000 { // 10MB limit for safety
+                    // Try with higher compression if too large
+                    guard let compressedData = image.jpegData(compressionQuality: 0.5) else {
+                        print("Failed to compress image")
+                        throw ServiceError.imageConversionFailed
+                    }
+                    
+                    if compressedData.count > 10_000_000 {
+                        print("Image too large even after compression")
+                        throw ServiceError.imageConversionFailed
+                    }
+                    
+                    let base64Image = compressedData.base64EncodedString()
+                    print("Compressed image included for last user message, base64 size: \(base64Image.count)")
+                    apiMessages.append(OpenAIMessage(role: role, text: message.text, base64Image: base64Image, mimeType: "image/jpeg"))
+                } else {
+                    // Use original data if size is acceptable
+                    let mimeType = (imageData == image.jpegData(compressionQuality: 0.7)) ? "image/jpeg" : "image/png"
+                    let base64Image = imageData.base64EncodedString()
+                    print("Image included for last user message, base64 size: \(base64Image.count), mime type: \(mimeType)")
+                    apiMessages.append(OpenAIMessage(role: role, text: message.text, base64Image: base64Image, mimeType: mimeType))
+                }
             } else {
                 // For all other messages (or if no new image for the last one), send text only
-                 apiMessages.append(OpenAIMessage(role: role, text: message.text))
+                apiMessages.append(OpenAIMessage(role: role, text: message.text))
             }
         }
         

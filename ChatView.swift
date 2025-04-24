@@ -1,5 +1,7 @@
 import SwiftUI
 import PhotosUI // Import PhotosUI
+import UniformTypeIdentifiers // Import UniformTypeIdentifiers for UTType
+import Photos
 
 // Define a struct to represent a chat message
 struct ChatMessage: Identifiable, Codable {
@@ -29,7 +31,6 @@ struct ChatView: View {
     @State private var showingAttachmentOptions = false
     
     // State for image picking
-    @State private var selectedPhotoItem: PhotosPickerItem? = nil
     @State private var selectedImage: UIImage? = nil
     @State private var showingCameraPicker = false // Separate state for camera sheet
     @State private var showingPhotosPicker = false // Separate state for Photos picker
@@ -47,203 +48,223 @@ struct ChatView: View {
         // Or keep using onAppear. Let's stick with onAppear for now.
     }
 
+    // --- Main Body --- 
     var body: some View {
-        VStack {
-            ScrollViewReader { scrollViewProxy in
-                ScrollView {
-                    LazyVStack(alignment: .leading, spacing: 10) {
-                        ForEach(chatMessages) { message in
-                            MessageView(message: message)
-                                .id(message.id)
-                        }
-                         // Optional: Show typing indicator when loading
-                         if isLoading {
-                             HStack {
-                                 ProgressView() // Simple loading spinner
-                                     .padding(.leading)
-                                 Text("GPT is thinking...")
-                                     .font(.caption)
-                                     .foregroundColor(.secondary)
-                                 Spacer()
-                             }
-                             .padding(.horizontal)
-                         }
-                    }
-                    .padding(.horizontal)
-                    .onChange(of: chatMessages.count) { _, _ in
-                        scrollToBottom(proxy: scrollViewProxy)
-                    }
-                }
-                .onTapGesture { hideKeyboard() }
+        VStack(spacing: 0) { // Use spacing 0 to avoid extra gaps
+            messageListView // Extracted ScrollView
+            
+            // Conditionally show preview *above* input area
+            if selectedImage != nil {
+                imagePreview
+                    .padding(.bottom, 4) // Add padding below preview
             }
 
-            // --- Image Preview Area --- 
-            if let image = selectedImage {
-                HStack {
-                    Image(uiImage: image)
-                        .resizable()
-                        .scaledToFit()
-                        .frame(height: 60)
-                        .clipShape(RoundedRectangle(cornerRadius: 8))
-                        .overlay(alignment: .topTrailing) {
-                            Button {
-                                withAnimation { selectedImage = nil }
-                            } label: {
-                                Image(systemName: "xmark.circle.fill")
-                                    .foregroundColor(.gray)
-                                    .background(Color.white.opacity(0.6))
-                                    .clipShape(Circle())
-                            }
-                            .padding(4)
-                        }
-                    Spacer() // Push preview to left
-                }
-                .padding(.horizontal)
-                .transition(.scale.combined(with: .opacity)) // Add animation
-            }
-            // --- End Image Preview Area --- 
-
-            // Input area
-            HStack(spacing: 10) {
-                 Button(action: {
-                     hideKeyboard()
-                     showingAttachmentOptions = true
-                 }) {
-                     Image(systemName: "plus.circle.fill")
-                         .resizable()
-                         .frame(width: 30, height: 30)
-                 }
-                 .disabled(isLoading)
-
-                 // Use TextEditor for multi-line input
-                 ZStack(alignment: .leading) {
-                     // Placeholder Text
-                     if messageText.isEmpty {
-                         Text("Ask Anything...") // Updated placeholder text
-                             .foregroundColor(Color(.placeholderText))
-                             .padding(.horizontal, 5)
-                             .padding(.vertical, 8) // Match TextEditor padding
-                     }
-                     
-                     TextEditor(text: $messageText)
-                         .frame(maxHeight: 100) 
-                         .fixedSize(horizontal: false, vertical: true) 
-                         .padding(.vertical, 4) 
-                         .padding(.horizontal, 1)
-                         .scrollContentBackground(.hidden) // Hide default scroll view background
-                         .background(Color.clear) // Keep explicit clear background
-                         
-                 }
-                 .padding(.horizontal, 10)
-                 .padding(.vertical, 4) 
-                 .background(Color(.systemGray6))
-                 .clipShape(RoundedRectangle(cornerRadius: 20)) 
-
-                // Send button
-                 Button(action: { sendMessage() }) {
-                     Image(systemName: "paperplane.fill")
-                         .resizable()
-                         .frame(width: 20, height: 20)
-                         .padding(8)
-                 }
-                 .disabled(messageText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && selectedImage == nil || isLoading)
-             }
-             .padding(.horizontal)
-             .padding(.vertical, 8)
-             .opacity(isLoading ? 0.5 : 1.0)
+            inputArea // Extracted input HStack
         }
-        .contentShape(Rectangle()) // Ensure the VStack receives gestures in empty areas
-        .gesture(
-            DragGesture()
-                .onEnded { value in
-                    let horizontalAmount = value.translation.width
-                    let verticalAmount = value.translation.height
-                    // startX is no longer needed for this logic
-                    // let startX = value.startLocation.x 
-                    
-                    // Define thresholds
-                    // edgeThreshold is no longer needed
-                    let distanceThreshold: CGFloat = 100.0 // How far left drag must go
-                    let maxVerticalDrag: CGFloat = 50.0 // Limit vertical movement
-
-                    // Check conditions: Swipe LEFT anywhere
-                    if horizontalAmount < -distanceThreshold && // Check for swipe left
-                       abs(verticalAmount) < maxVerticalDrag {
-                        print("Swipe left gesture detected, opening history.")
-                        withAnimation { 
-                            showHistory = true
-                        }
-                    }
-                }
-        )
+        .contentShape(Rectangle()) // Apply to VStack
+        .gesture(swipeGesture) // Apply gesture to VStack
         .navigationTitle("GPT 4.1")
         .navigationBarTitleDisplayMode(.inline)
         .navigationBarBackButtonHidden(true)
-        .toolbar { // Add toolbar items
-             ToolbarItem(placement: .navigationBarLeading) { // Hamburger Button
-                 Button {
-                     showHistory = true
-                 } label: {
-                     Image(systemName: "line.3.horizontal")
-                 }
-             }
-             ToolbarItem(placement: .navigationBarTrailing) {
-                 Button(action: startNewChat) {
-                     Image(systemName: "plus") // New chat icon
-                 }
-             }
-         }
-         .sheet(isPresented: $showHistory) { // Present History View
-             // Explicitly label both closure parameters
-             HistoryView(storageManager: storageManager, 
-                         onChangeApiKeyRequested: onChangeApiKeyRequested, 
-                         onSessionSelected: { selectedSessionId in
-                 loadSession(sessionId: selectedSessionId)
-                 showHistory = false // Dismiss sheet after selection
-             })
-         }
-         .sheet(isPresented: $showingCameraPicker) { // Sheet for Camera
-             ImagePicker(selectedImage: $selectedImage, sourceType: .camera)
-                 .ignoresSafeArea() // Allow camera full screen
-         }
-         .photosPicker( // Modifier for Photo Library selection
-             isPresented: $showingPhotosPicker, // Bind to dedicated state variable
-             selection: $selectedPhotoItem,
-             matching: .images 
-         )
-         .onChange(of: selectedPhotoItem) { _, newItem in // Handle selection from PhotosPicker
-             Task { @MainActor in 
-                if let data = try? await newItem?.loadTransferable(type: Data.self) {
-                    selectedImage = UIImage(data: data)
-                    // Don't set selectedPhotoItem = nil here
-                } else {
-                    print("Failed to load image data")
+        .toolbar(content: toolbarContent)
+        .sheet(isPresented: $showHistory, content: historySheet)
+        .sheet(isPresented: $showingCameraPicker, content: cameraSheet)
+        .sheet(isPresented: $showingPhotosPicker) {
+            PHPickerRepresentable(image: $selectedImage)
+        }
+        .confirmationDialog("Attach Content", isPresented: $showingAttachmentOptions, titleVisibility: .visible, actions: attachmentDialogActions, message: attachmentDialogMessage)
+        .onAppear(perform: startNewChat)
+    }
+    
+    // --- Extracted View Components --- 
+    
+    // Computed property for the message list ScrollView
+    private var messageListView: some View {
+        ScrollViewReader { scrollViewProxy in
+            ScrollView {
+                LazyVStack(alignment: .leading, spacing: 10) {
+                    ForEach(chatMessages) { message in
+                        MessageView(message: message)
+                            .id(message.id)
+                    }
+                    if isLoading {
+                        loadingIndicator
+                    }
                 }
-                // Picker dismisses automatically via the binding
-                // selectedPhotoItem = nil // REMOVED
+                .padding(.top, 10) // Add padding at the top of messages
+                .padding(.horizontal)
+            }
+            .onChange(of: chatMessages.count) { _, _ in
+                scrollToBottom(proxy: scrollViewProxy)
+            }
+            .onTapGesture { hideKeyboard() }
+        }
+    }
+    
+    // Computed property for the image preview
+    @ViewBuilder // Use ViewBuilder for conditional content
+    private var imagePreview: some View {
+        if let image = selectedImage {
+            HStack {
+                Image(uiImage: image)
+                    .resizable()
+                    .scaledToFit()
+                    .frame(height: 60)
+                    .clipShape(RoundedRectangle(cornerRadius: 8))
+                    .overlay(alignment: .topTrailing) {
+                        Button {
+                            withAnimation { selectedImage = nil }
+                        } label: {
+                            Image(systemName: "xmark.circle.fill")
+                                .foregroundColor(.gray)
+                                .background(Color.white.opacity(0.6))
+                                .clipShape(Circle())
+                        }
+                        .padding(4)
+                    }
+                Spacer()
+            }
+            .padding(.horizontal)
+            .transition(.scale.combined(with: .opacity))
+        }
+    }
+    
+    // Computed property for the input area HStack
+    private var inputArea: some View {
+        HStack(spacing: 10) {
+             Button(action: {
+                 hideKeyboard()
+                 showingAttachmentOptions = true
+             }) {
+                 Image(systemName: "plus.circle.fill")
+                     .resizable()
+                     .frame(width: 30, height: 30)
              }
-         }
-         .confirmationDialog("Attach Content", isPresented: $showingAttachmentOptions, titleVisibility: .visible) {
-             Button {
-                 // Trigger Photos Picker by setting its dedicated state variable
-                 showingPhotosPicker = true 
-             } label: {
-                 Label("Photos", systemImage: "photo.on.rectangle")
-             }
+             .disabled(isLoading)
 
-             Button {
-                 if UIImagePickerController.isSourceTypeAvailable(.camera) {
-                     showingCameraPicker = true
-                 } else {
-                     print("Camera not available")
+             ZStack(alignment: .leading) {
+                 if messageText.isEmpty {
+                     Text("Ask Anything...")
+                         .foregroundColor(Color(.placeholderText))
+                         .padding(.horizontal, 5)
+                         .padding(.vertical, 8)
                  }
-             } label: {
-                 Label("Camera", systemImage: "camera")
+                 TextEditor(text: $messageText)
+                     .frame(maxHeight: 100)
+                     .fixedSize(horizontal: false, vertical: true)
+                     .padding(.vertical, 4)
+                     .padding(.horizontal, 1)
+                     .scrollContentBackground(.hidden)
+                     .background(Color.clear)
              }
-         } message: {
-             Text("Select source")
+             .padding(.horizontal, 10)
+             .padding(.vertical, 4)
+             .background(Color(.systemGray6))
+             .clipShape(RoundedRectangle(cornerRadius: 20))
+
+             Button(action: { sendMessage() }) {
+                 Image(systemName: "paperplane.fill")
+                     .resizable()
+                     .frame(width: 20, height: 20)
+                     .padding(8)
+             }
+             .disabled(messageText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && selectedImage == nil || isLoading)
          }
-         .onAppear(perform: startNewChat) // Always start a new chat when the view appears
+         .padding(.horizontal)
+         .padding(.vertical, 8)
+         .opacity(isLoading ? 0.5 : 1.0)
+         .background(.thinMaterial) // Add material background to input bar
+    }
+    
+    // Computed property for the loading indicator
+    private var loadingIndicator: some View {
+         HStack {
+             ProgressView()
+                 .padding(.leading)
+             Text("GPT is thinking...")
+                 .font(.caption)
+                 .foregroundColor(.secondary)
+             Spacer()
+         }
+         .padding(.horizontal)
+    }
+    
+    // Computed property for the swipe gesture
+    private var swipeGesture: some Gesture {
+         DragGesture()
+             .onEnded { value in
+                 let horizontalAmount = value.translation.width
+                 let verticalAmount = value.translation.height
+                 let distanceThreshold: CGFloat = 100.0
+                 let maxVerticalDrag: CGFloat = 50.0
+
+                 if horizontalAmount < -distanceThreshold && abs(verticalAmount) < maxVerticalDrag {
+                     withAnimation { showHistory = true }
+                 }
+             }
+    }
+    
+    // --- Extracted Modifier Content --- 
+    
+    // Function returning ToolbarContent
+    @ToolbarContentBuilder
+    private func toolbarContent() -> some ToolbarContent {
+         ToolbarItem(placement: .navigationBarLeading) {
+             Button {
+                 showHistory = true
+             } label: {
+                 Image(systemName: "line.3.horizontal")
+             }
+         }
+         ToolbarItem(placement: .navigationBarTrailing) {
+             Button(action: startNewChat) {
+                 Image(systemName: "plus")
+             }
+         }
+    }
+    
+    // Function returning Sheet content for History
+    @ViewBuilder
+    private func historySheet() -> some View {
+        HistoryView(storageManager: storageManager, 
+                    onChangeApiKeyRequested: onChangeApiKeyRequested, 
+                    onSessionSelected: { selectedSessionId in
+            loadSession(sessionId: selectedSessionId)
+            showHistory = false
+        })
+    }
+    
+    // Function returning Sheet content for Camera
+    @ViewBuilder
+    private func cameraSheet() -> some View {
+        ImagePicker(selectedImage: $selectedImage, sourceType: .camera)
+            .ignoresSafeArea()
+    }
+    
+    // Function returning actions for ConfirmationDialog
+    @ViewBuilder
+    private func attachmentDialogActions() -> some View {
+        Button {
+            showingPhotosPicker = true 
+        } label: {
+            Label("Photos", systemImage: "photo.on.rectangle")
+        }
+
+        Button {
+            if UIImagePickerController.isSourceTypeAvailable(.camera) {
+                showingCameraPicker = true
+            } else {
+                print("Camera not available")
+            }
+        } label: {
+            Label("Camera", systemImage: "camera")
+        }
+    }
+    
+    // Function returning message for ConfirmationDialog
+    @ViewBuilder
+    private func attachmentDialogMessage() -> some View {
+        Text("Select source")
     }
 
     // Main function to trigger sending
@@ -410,6 +431,131 @@ struct MessageView: View {
                     .foregroundColor(Color(.label))
                     .textSelection(.enabled)
                 Spacer() 
+            }
+        }
+    }
+}
+
+// New struct for PHPickerViewController
+struct PHPickerRepresentable: UIViewControllerRepresentable {
+    @Binding var image: UIImage?
+    @Environment(\.dismiss) private var dismiss
+
+    func makeUIViewController(context: Context) -> PHPickerViewController {
+        var config = PHPickerConfiguration()
+        config.filter = .images
+        config.selectionLimit = 1
+        config.preferredAssetRepresentationMode = .current
+        
+        let picker = PHPickerViewController(configuration: config)
+        picker.delegate = context.coordinator
+        return picker
+    }
+
+    func updateUIViewController(_ uiViewController: PHPickerViewController, context: Context) {
+        // Not needed
+    }
+
+    func makeCoordinator() -> Coordinator {
+        Coordinator(self)
+    }
+
+    class Coordinator: NSObject, PHPickerViewControllerDelegate {
+        let parent: PHPickerRepresentable
+
+        init(_ parent: PHPickerRepresentable) {
+            self.parent = parent
+        }
+
+        func picker(_ picker: PHPickerViewController, didFinishPicking results: [PHPickerResult]) {
+            picker.dismiss(animated: true)
+            
+            guard let result = results.first else {
+                print("No image selected")
+                return
+            }
+            
+            // Clear any existing image while loading
+            DispatchQueue.main.async {
+                self.parent.image = nil
+            }
+            
+            // Try multiple UTTypes for better compatibility
+            let supportedTypes = [UTType.image, UTType.jpeg, UTType.png, UTType.heic, UTType.tiff]
+            
+            // First approach: Try loading as UIImage directly
+            if result.itemProvider.canLoadObject(ofClass: UIImage.self) {
+                result.itemProvider.loadObject(ofClass: UIImage.self) { [weak self] image, error in
+                    if let error = error {
+                        print("Error loading image: \(error.localizedDescription)")
+                        // Don't return here - we'll try other approaches
+                    } else if let image = image as? UIImage {
+                        DispatchQueue.main.async {
+                            self?.parent.image = image
+                            print("Successfully loaded image via UIImage")
+                        }
+                        return // Success!
+                    }
+                    
+                    // If we get here, the direct approach failed, try data approach
+                    self?.tryLoadingAsData(result: result)
+                }
+            } else {
+                // Direct UIImage loading not supported, try data approach
+                tryLoadingAsData(result: result)
+            }
+        }
+        
+        private func tryLoadingAsData(result: PHPickerResult) {
+            // Second approach: Try loading as data with multiple types
+            for type in [UTType.jpeg, UTType.png, UTType.heic] {
+                if result.itemProvider.hasItemConformingToTypeIdentifier(type.identifier) {
+                    result.itemProvider.loadDataRepresentation(forTypeIdentifier: type.identifier) { [weak self] (data, error) in
+                        if let error = error {
+                            print("Error loading image data: \(error.localizedDescription)")
+                            return
+                        }
+                        
+                        guard let data = data else {
+                            print("No data loaded for type: \(type.identifier)")
+                            return
+                        }
+                        
+                        // Create UIImage from data
+                        if let image = UIImage(data: data) {
+                            DispatchQueue.main.async {
+                                self?.parent.image = image
+                                print("Successfully loaded image via data for type: \(type.identifier)")
+                            }
+                        } else {
+                            print("Failed to create UIImage from data for type: \(type.identifier)")
+                        }
+                    }
+                    return // Started loading attempt, don't try other types in parallel
+                }
+            }
+            
+            // Generic approach as last resort
+            result.itemProvider.loadItem(forTypeIdentifier: UTType.image.identifier) { [weak self] (item, error) in
+                if let error = error {
+                    print("Error loading item: \(error.localizedDescription)")
+                    return
+                }
+                
+                // Handle different returned item types
+                if let url = item as? URL, let data = try? Data(contentsOf: url), let image = UIImage(data: data) {
+                    DispatchQueue.main.async {
+                        self?.parent.image = image
+                        print("Successfully loaded image via URL")
+                    }
+                } else if let data = item as? Data, let image = UIImage(data: data) {
+                    DispatchQueue.main.async {
+                        self?.parent.image = image
+                        print("Successfully loaded image via generic data")
+                    }
+                } else {
+                    print("Failed to load image from item type: \(String(describing: type(of: item)))")
+                }
             }
         }
     }
