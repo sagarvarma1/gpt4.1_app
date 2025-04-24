@@ -177,10 +177,9 @@ struct OpenAIError: Codable {
 
 class OpenAIService {
     private let apiURL = URL(string: "https://api.openai.com/v1/chat/completions")!
-    private let modelName = "gpt-4.1" // Using the desired model
-
+    
     // Update signature to accept history and optional new image for the *last* message
-    func generateResponse(currentHistory: [ChatMessage], apiKey: String, newImage: UIImage?) async throws -> String {
+    func generateResponse(currentHistory: [ChatMessage], apiKey: String, newImage: UIImage?, model: String = "gpt-4.1") async throws -> String {
         
         // Map ChatMessage history to OpenAIMessage history
         var apiMessages: [OpenAIMessage] = []
@@ -236,7 +235,7 @@ class OpenAIService {
             throw ServiceError.invalidResponseStructure // Or a more specific error
         }
 
-        let requestBody = OpenAIRequest(model: modelName, messages: apiMessages)
+        let requestBody = OpenAIRequest(model: model, messages: apiMessages)
         
         var request = URLRequest(url: apiURL)
         request.httpMethod = "POST"

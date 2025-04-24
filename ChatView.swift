@@ -28,12 +28,34 @@ struct ChatSession: Identifiable, Codable {
     }
 }
 
+// Define available OpenAI models
+enum OpenAIModel: String, CaseIterable, Identifiable, Codable {
+    case gpt41 = "gpt-4.1"
+    case gpt41Mini = "gpt-4.1-mini"
+    case gpt41Nano = "gpt-4.1-nano"
+    
+    var id: String { self.rawValue }
+    
+    var displayName: String {
+        switch self {
+        case .gpt41:
+            return "GPT 4.1"
+        case .gpt41Mini:
+            return "GPT 4.1 Mini"
+        case .gpt41Nano:
+            return "GPT 4.1 Nano"
+        }
+    }
+}
+
 struct ChatView: View {
     @State private var messageText: String = ""
     @State private var chatMessages: [ChatMessage] = []
     @State private var currentSessionId: UUID?
     @State private var showHistory = false
     @State private var showingAttachmentOptions = false
+    @State private var showModelSelector = false // State for showing model selection menu
+    @State private var selectedModel: OpenAIModel = .gpt41 // Default to GPT-4.1
     
     // State for image picking
     @State private var selectedImage: UIImage? = nil
@@ -67,17 +89,55 @@ struct ChatView: View {
             inputArea // Extracted input HStack
         }
         .contentShape(Rectangle()) // Apply to VStack
-        .gesture(swipeGesture) // Apply gesture to VStack
-        .navigationTitle("GPT 4.1")
+        // Add a swipe down gesture solely to dismiss the keyboard
+        .gesture(
+            DragGesture(minimumDistance: 20)
+                .onEnded { value in
+                    // Only respond to downward swipes
+                    if value.translation.height > 50 && abs(value.translation.width) < abs(value.translation.height) {
+                        hideKeyboard()
+                    }
+                }
+        )
+        .navigationTitle("")
         .navigationBarTitleDisplayMode(.inline)
         .navigationBarBackButtonHidden(true)
-        .toolbar(content: toolbarContent)
+        .toolbar {
+            ToolbarItem(placement: .principal) {
+                Button(action: { showModelSelector = true }) {
+                    HStack(spacing: 4) {
+                        Text(selectedModel.displayName)
+                            .font(.headline)
+                            .foregroundColor(.white)
+                        Image(systemName: "chevron.down")
+                            .font(.caption)
+                            .foregroundColor(.white)
+                    }
+                }
+            }
+            ToolbarItem(placement: .navigationBarLeading) {
+                Button {
+                    showHistory = true
+                } label: {
+                    Image(systemName: "line.3.horizontal")
+                        .foregroundColor(.white)
+                }
+            }
+            
+            ToolbarItem(placement: .navigationBarTrailing) {
+                 Button(action: startNewChat) {
+                     Image(systemName: "plus")
+                         .foregroundColor(.white)
+                 }
+            }
+        }
         .sheet(isPresented: $showHistory, content: historySheet)
         .sheet(isPresented: $showingCameraPicker, content: cameraSheet)
         .sheet(isPresented: $showingPhotosPicker) {
             PHPickerRepresentable(image: $selectedImage)
         }
         .confirmationDialog("Attach Content", isPresented: $showingAttachmentOptions, titleVisibility: .visible, actions: attachmentDialogActions, message: attachmentDialogMessage)
+        .confirmationDialog("Select Model", isPresented: $showModelSelector, titleVisibility: .visible, actions: modelSelectorActions, message: modelSelectorMessage)
         .onAppear(perform: startNewChat)
     }
     
@@ -98,6 +158,7 @@ struct ChatView: View {
                 }
                 .padding(.top, 10) // Add padding at the top of messages
                 .padding(.horizontal)
+                .padding(.bottom, 10) // Add padding at the bottom for more breathing room
             }
             .onChange(of: chatMessages.count) { _, _ in
                 scrollToBottom(proxy: scrollViewProxy)
@@ -114,18 +175,19 @@ struct ChatView: View {
                 Image(uiImage: image)
                     .resizable()
                     .scaledToFit()
-                    .frame(height: 60)
+                    .frame(height: 120) // Increased height from 60 to 120
                     .clipShape(RoundedRectangle(cornerRadius: 8))
                     .overlay(alignment: .topTrailing) {
                         Button {
                             withAnimation { selectedImage = nil }
                         } label: {
                             Image(systemName: "xmark.circle.fill")
-                                .foregroundColor(.gray)
-                                .background(Color.white.opacity(0.6))
+                                .font(.system(size: 22)) // Explicitly setting the size
+                                .foregroundColor(.white)
+                                .background(Color.black.opacity(0.6))
                                 .clipShape(Circle())
                         }
-                        .padding(4)
+                        .offset(x: 8, y: -8) // Position the button outside the image
                     }
                 Spacer()
             }
@@ -194,41 +256,11 @@ struct ChatView: View {
          .padding(.horizontal)
     }
     
-    // Computed property for the swipe gesture
-    private var swipeGesture: some Gesture {
-         DragGesture()
-             .onEnded { value in
-                 let horizontalAmount = value.translation.width
-                 let verticalAmount = value.translation.height
-                 let distanceThreshold: CGFloat = 100.0
-                 let maxVerticalDrag: CGFloat = 50.0
-
-                 if horizontalAmount < -distanceThreshold && abs(verticalAmount) < maxVerticalDrag {
-                     withAnimation { showHistory = true }
-                 }
-             }
-    }
-    
     // --- Extracted Modifier Content --- 
     
-    // Function returning ToolbarContent
-    @ToolbarContentBuilder
-    private func toolbarContent() -> some ToolbarContent {
-         ToolbarItem(placement: .navigationBarLeading) {
-             Button {
-                 showHistory = true
-             } label: {
-                 Image(systemName: "line.3.horizontal")
-             }
-         }
-         ToolbarItem(placement: .navigationBarTrailing) {
-             Button(action: startNewChat) {
-                 Image(systemName: "plus")
-             }
-         }
-    }
-    
-    // Function returning Sheet content for History
+    // This function has been replaced with inline toolbar in body
+    // Function was previously here: private func toolbarContent() -> some ToolbarContent {...}
+
     @ViewBuilder
     private func historySheet() -> some View {
         HistoryView(storageManager: storageManager, 
@@ -270,6 +302,25 @@ struct ChatView: View {
     @ViewBuilder
     private func attachmentDialogMessage() -> some View {
         Text("Select source")
+    }
+
+    // Function returning actions for model selector ConfirmationDialog
+    @ViewBuilder
+    private func modelSelectorActions() -> some View {
+        ForEach(OpenAIModel.allCases, id: \.self) { model in
+            Button {
+                selectedModel = model
+                showModelSelector = false
+            } label: {
+                Text(model.displayName)
+            }
+        }
+    }
+    
+    // Function returning message for model selector ConfirmationDialog
+    @ViewBuilder
+    private func modelSelectorMessage() -> some View {
+        Text("Select model")
     }
 
     // Main function to trigger sending
@@ -330,7 +381,8 @@ struct ChatView: View {
             // Pass the temporary history and the image to the service
             let responseText = try await openAIService.generateResponse(currentHistory: currentChatHistory, 
                                                                   apiKey: apiKey, 
-                                                                  newImage: imageToSend)
+                                                                  newImage: imageToSend,
+                                                                  model: selectedModel.rawValue)
             appendModelMessage(responseText)
         } catch {
             print("API Error: \(error.localizedDescription)")
@@ -420,6 +472,11 @@ struct ChatView: View {
     // Helper to hide keyboard
     private func hideKeyboard() {
         UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
+        
+        // Additional method to ensure keyboard dismissal
+        DispatchQueue.main.async {
+            UIApplication.shared.windows.filter {$0.isKeyWindow}.first?.endEditing(true)
+        }
     }
 }
 
@@ -430,8 +487,10 @@ struct MessageView: View {
     // Computed property to safely create AttributedString from Markdown
     private var attributedString: AttributedString {
         do {
-            // Attempt to initialize AttributedString from Markdown
-            return try AttributedString(markdown: message.text)
+            // Attempt to initialize AttributedString from Markdown with preserved whitespace
+            var options = AttributedString.MarkdownParsingOptions()
+            options.interpretedSyntax = .inlineOnlyPreservingWhitespace
+            return try AttributedString(markdown: message.text, options: options)
         } catch {
             // If Markdown parsing fails, return a plain AttributedString
             print("Error parsing Markdown: \(error)")
@@ -456,26 +515,28 @@ struct MessageView: View {
                     .scaledToFit()
                     .cornerRadius(8)
                     .frame(maxWidth: 240, maxHeight: 240)
+                    .frame(maxWidth: .infinity, alignment: .trailing) // Right-justify all images
             }
             
             // Message bubble
             HStack {
                 if message.isFromUser {
                     Spacer() 
-                    Text(message.text)
+                    Text(LocalizedStringKey(message.text))
                         .padding(.horizontal, 12)
                         .padding(.vertical, 8)
                         .background(Color.blue)
                         .foregroundColor(.white)
-                        .clipShape(Capsule())
+                        .clipShape(RoundedRectangle(cornerRadius: 18)) // Less rounded corners compared to Capsule
                         .textSelection(.enabled)
                 } else {
-                    // Display the AttributedString
+                    // Display the AttributedString with proper newline handling
                     Text(attributedString)
                         .padding(.horizontal, 12)
                         .padding(.vertical, 8)
                         .foregroundColor(Color(.label))
                         .textSelection(.enabled)
+                        .fixedSize(horizontal: false, vertical: true) // Ensures text expands to fit content
                     Spacer() 
                 }
             }
