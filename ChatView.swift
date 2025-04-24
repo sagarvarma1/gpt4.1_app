@@ -56,6 +56,7 @@ struct ChatView: View {
     @State private var showingAttachmentOptions = false
     @State private var showModelSelector = false // State for showing model selection menu
     @State private var selectedModel: OpenAIModel = .gpt41 // Default to GPT-4.1
+    @State private var keyboardVisible = false // Track keyboard visibility
     
     // State for image picking
     @State private var selectedImage: UIImage? = nil
@@ -91,14 +92,21 @@ struct ChatView: View {
         .contentShape(Rectangle()) // Apply to VStack
         // Add a swipe down gesture solely to dismiss the keyboard
         .gesture(
-            DragGesture(minimumDistance: 20)
-                .onEnded { value in
-                    // Only respond to downward swipes
-                    if value.translation.height > 50 && abs(value.translation.width) < abs(value.translation.height) {
+            DragGesture(minimumDistance: 5) // Even more sensitive
+                .onChanged { _ in
+                    // If keyboard is visible, attempt to dismiss it on any downward gesture
+                    if keyboardVisible {
                         hideKeyboard()
                     }
                 }
         )
+        .onAppear {
+            setupKeyboardObservers()
+            startNewChat()
+        }
+        .onDisappear {
+            NotificationCenter.default.removeObserver(self)
+        }
         .navigationTitle("")
         .navigationBarTitleDisplayMode(.inline)
         .navigationBarBackButtonHidden(true)
@@ -473,9 +481,32 @@ struct ChatView: View {
     private func hideKeyboard() {
         UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
         
-        // Additional method to ensure keyboard dismissal
+        // Additional methods to ensure keyboard dismissal
         DispatchQueue.main.async {
             UIApplication.shared.windows.filter {$0.isKeyWindow}.first?.endEditing(true)
+            // Force resign first responder on any text fields
+            for window in UIApplication.shared.windows {
+                window.subviews.forEach { dismissKeyboardFromView($0) }
+            }
+        }
+    }
+    
+    // Recursively force keyboard dismissal
+    private func dismissKeyboardFromView(_ view: UIView) {
+        if view.isFirstResponder {
+            view.resignFirstResponder()
+        }
+        view.subviews.forEach { dismissKeyboardFromView($0) }
+    }
+    
+    // Setup keyboard observers
+    private func setupKeyboardObservers() {
+        NotificationCenter.default.addObserver(forName: UIResponder.keyboardWillShowNotification, object: nil, queue: .main) { _ in
+            self.keyboardVisible = true
+        }
+        
+        NotificationCenter.default.addObserver(forName: UIResponder.keyboardWillHideNotification, object: nil, queue: .main) { _ in
+            self.keyboardVisible = false
         }
     }
 }
