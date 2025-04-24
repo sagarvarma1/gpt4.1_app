@@ -9,6 +9,11 @@ struct ChatMessage: Identifiable, Codable {
     let text: String
     let isFromUser: Bool
     let timestamp: Date
+    var imageData: Data? // Store image as Data for Codable compatibility
+    
+    enum CodingKeys: String, CodingKey {
+        case id, text, isFromUser, timestamp, imageData
+    }
 }
 
 // Define a struct for a chat session
@@ -286,12 +291,25 @@ struct ChatView: View {
     @MainActor // Ensure UI updates happen on the main thread
     func appendAndSend(text: String) async {
         let imageToSend = selectedImage
-        if imageToSend != nil {
-             withAnimation { selectedImage = nil }
+        var imageData: Data? = nil
+        
+        // Convert UIImage to Data if available
+        if let image = imageToSend {
+            // Compress to JPEG format with good quality
+            imageData = image.jpegData(compressionQuality: 0.7)
+            withAnimation { selectedImage = nil }
         }
+        
         messageText = "" 
 
-        let userMessage = ChatMessage(text: text, isFromUser: true, timestamp: Date())
+        // Create message with image data if available
+        let userMessage = ChatMessage(
+            text: text, 
+            isFromUser: true, 
+            timestamp: Date(),
+            imageData: imageData
+        )
+        
         // Create a temporary history including the new user message BEFORE the API call
         var currentChatHistory = chatMessages
         currentChatHistory.append(userMessage)
@@ -323,19 +341,28 @@ struct ChatView: View {
     // Helper to append model message and save
     @MainActor
     private func appendModelMessage(_ content: String) {
-         let modelMessage = ChatMessage(text: content, isFromUser: false, timestamp: Date())
+         let modelMessage = ChatMessage(
+             text: content, 
+             isFromUser: false, 
+             timestamp: Date(),
+             imageData: nil
+         )
          // Append the new message to the existing chatMessages state
          chatMessages.append(modelMessage) 
          saveCurrentSession() // Save session including the model response
     }
     
-    // Helper to append error message and save
+    // Helper to append error message
     @MainActor
-    private func appendErrorMessage(_ message: String) {
-        let errorMessage = ChatMessage(text: message, isFromUser: false, timestamp: Date())
-        // Append the error message to the existing chatMessages state
-        chatMessages.append(errorMessage)
-        saveCurrentSession() // Save session including the error message
+    private func appendErrorMessage(_ errorText: String) {
+         let errorMessage = ChatMessage(
+             text: errorText, 
+             isFromUser: false, 
+             timestamp: Date(),
+             imageData: nil
+         )
+         chatMessages.append(errorMessage)
+         saveCurrentSession() // Save session including the error message
     }
 
     func startNewChat() {
@@ -411,28 +438,49 @@ struct MessageView: View {
             return AttributedString(message.text)
         }
     }
+    
+    // Convert Data to UIImage if available
+    private var messageImage: UIImage? {
+        if let imageData = message.imageData {
+            return UIImage(data: imageData)
+        }
+        return nil
+    }
 
     var body: some View {
-        HStack {
-            if message.isFromUser {
-                Spacer() 
-                Text(message.text)
-                    .padding(.horizontal, 12)
-                    .padding(.vertical, 8)
-                    .background(Color.blue)
-                    .foregroundColor(.white)
-                    .clipShape(Capsule())
-                    .textSelection(.enabled)
-            } else {
-                // Display the AttributedString
-                Text(attributedString)
-                    .padding(.horizontal, 12)
-                    .padding(.vertical, 8)
-                    .foregroundColor(Color(.label))
-                    .textSelection(.enabled)
-                Spacer() 
+        VStack(alignment: message.isFromUser ? .trailing : .leading, spacing: 4) {
+            // Display image above the bubble if available
+            if let image = messageImage {
+                Image(uiImage: image)
+                    .resizable()
+                    .scaledToFit()
+                    .cornerRadius(8)
+                    .frame(maxWidth: 240, maxHeight: 240)
+            }
+            
+            // Message bubble
+            HStack {
+                if message.isFromUser {
+                    Spacer() 
+                    Text(message.text)
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 8)
+                        .background(Color.blue)
+                        .foregroundColor(.white)
+                        .clipShape(Capsule())
+                        .textSelection(.enabled)
+                } else {
+                    // Display the AttributedString
+                    Text(attributedString)
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 8)
+                        .foregroundColor(Color(.label))
+                        .textSelection(.enabled)
+                    Spacer() 
+                }
             }
         }
+        .padding(.horizontal, 4) // Add some horizontal padding to the whole message container
     }
 }
 
