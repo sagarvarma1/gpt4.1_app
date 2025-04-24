@@ -116,10 +116,10 @@ struct ChatView: View {
                     HStack(spacing: 4) {
                         Text(selectedModel.displayName)
                             .font(.headline)
-                            .foregroundColor(.white)
+                            .foregroundColor(Color(.label))
                         Image(systemName: "chevron.down")
                             .font(.caption)
-                            .foregroundColor(.white)
+                            .foregroundColor(Color(.label))
                     }
                 }
             }
@@ -128,14 +128,14 @@ struct ChatView: View {
                     showHistory = true
                 } label: {
                     Image(systemName: "line.3.horizontal")
-                        .foregroundColor(.white)
+                        .foregroundColor(Color(.label))
                 }
             }
             
             ToolbarItem(placement: .navigationBarTrailing) {
                  Button(action: startNewChat) {
                      Image(systemName: "plus")
-                         .foregroundColor(.white)
+                         .foregroundColor(Color(.label))
                  }
             }
         }

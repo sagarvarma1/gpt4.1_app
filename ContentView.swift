@@ -59,6 +59,8 @@ struct SetupView: View {
     var body: some View {
         NavigationView { // Added NavigationView for title consistency if needed
             VStack {
+                Spacer()
+                
                 Text("Add Your Open AI API Key to Talk to GPT 4.1")
                     .font(.headline)
                     .padding(.bottom)
@@ -82,11 +84,16 @@ struct SetupView: View {
                 .padding(.top)
                 .buttonStyle(.borderedProminent)
                 .disabled(apiKeyInput.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                
+                Spacer()
             }
             .padding()
+            .frame(maxWidth: 500) // Limit width for better appearance on iPad
+            .frame(maxWidth: .infinity, maxHeight: .infinity) // Fill available space
             .navigationTitle("API Key Setup")
             .navigationBarTitleDisplayMode(.inline)
         }
+        .navigationViewStyle(StackNavigationViewStyle()) // Force stack style on all devices
     }
 }
 
